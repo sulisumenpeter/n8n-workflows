@@ -1,0 +1,199 @@
+{
+  "name": "Automated n8n GitHub Backup",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        -64
+      ],
+      "id": "b4f2c872-2cc8-4b3f-83c7-47647c3439a4",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://n8n.marksman.prod.page/api/v1/workflows",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -112,
+        -64
+      ],
+      "id": "23ca17bb-1168-4830-b3e8-66bb8449dcbd",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst input = $input.first().json;\nconst workflows = input.data ?? [];\n\nif (!Array.isArray(workflows) || workflows.length === 0) {\n  throw new Error('No workflows received from n8n API');\n}\n\n// Redact sensitive configuration fields.\nfunction sanitize(value, key = '') {\n  const sensitiveKey =\n    /password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key|access[_-]?key/i;\n\n  if (sensitiveKey.test(key)) {\n    return '[REDACTED - CONFIGURE MANUALLY]';\n  }\n\n  if (Array.isArray(value)) {\n    return value.map(item => sanitize(item));\n  }\n\n  if (value && typeof value === 'object') {\n    const result = {};\n\n    for (const [k, v] of Object.entries(value)) {\n      result[k] = sanitize(v, k);\n    }\n\n    return result;\n  }\n\n  if (typeof value === 'string') {\n    return value\n      .replace(\n        /\\b(Bearer\\s+)[A-Za-z0-9._~+/=-]+/gi,\n        '$1[REDACTED]'\n      )\n      .replace(/\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g, '[REDACTED_GITHUB_TOKEN]')\n      .replace(/\\bsk-[A-Za-z0-9_-]{20,}\\b/g, '[REDACTED_API_KEY]');\n  }\n\n  return value;\n}\n\n// Generate safe, consistent filenames.\nfunction slugify(name) {\n  const slug = String(name ?? 'workflow')\n    .toLowerCase()\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '')\n    .slice(0, 70);\n\n  return slug || 'workflow';\n}\n\nreturn workflows.map(workflow => {\n  if (!workflow.id || !workflow.name) {\n    throw new Error('Workflow is missing its ID or name');\n  }\n\n  // Remove credential references before exporting.\n  const nodes = (workflow.nodes ?? []).map(node => {\n    const { credentials, ...nodeWithoutCredentials } = node;\n    return sanitize(nodeWithoutCredentials);\n  });\n\n  // Build the portable workflow backup.\n  const backup = sanitize({\n    name: workflow.name,\n    nodes,\n    connections: workflow.connections ?? {},\n    settings: workflow.settings ?? {},\n    tags: workflow.tags ?? []\n  });\n\n  const filename =\n    `${slugify(workflow.name)}-${workflow.id}.json`;\n\n  const content = JSON.stringify(backup, null, 2);\n\n  return {\n    json: {\n      workflowId: workflow.id,\n      workflowName: workflow.name,\n      path: `workflows/${filename}`,\n      content,\n      contentBase64: Buffer\n        .from(content, 'utf8')\n        .toString('base64')\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -64
+      ],
+      "id": "f5a2ad0f-9208-44cf-ac9c-2802e956a535",
+      "name": "GitHub Backup"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://api.github.com/repos/sulisumenpeter/n8n-workflows/contents/' + $json.path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        384,
+        -288
+      ],
+      "id": "4f3dc999-d37c-49f2-80bb-05f850f57eb0",
+      "name": "Check Existing GitHub File"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "includeUnpaired": true
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        432,
+        16
+      ],
+      "id": "ae86f87a-e3aa-4495-a373-7a97e4788e05",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://api.github.com/repos/sulisumenpeter/n8n-workflows/contents/' + $json.path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    message: 'Backup n8n workflow: ' + $json.workflowName,\n    content: $json.contentBase64,\n    branch: 'main',\n    ...(\n      $json.statusCode === 200 && $json.body?.sha\n        ? { sha: $json.body.sha }\n        : {}\n    )\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        656,
+        16
+      ],
+      "id": "75aee057-fd30-4195-bec1-8dc8a4780d63",
+      "name": "Create or Update GitHub File"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "GitHub Backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Backup": {
+      "main": [
+        [
+          {
+            "node": "Check Existing GitHub File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing GitHub File": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Create or Update GitHub File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
