@@ -116,7 +116,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "=={{ JSON.stringify({\n  message: 'Backup n8n workflow: ' + $json.workflowName,\n  content: $json.contentBase64,\n  branch: 'main',\n  ...(\n    Number($json.statusCode) === 200 && $json.body?.sha\n      ? { sha: $json.body.sha }\n      : {}\n  )\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  message: 'Backup n8n workflow: ' + $json.workflowName,\n  content: $json.contentBase64,\n  branch: 'main',\n  ...(\n    Number($json.statusCode) === 200 && $json.body?.sha\n      ? { sha: $json.body.sha }\n      : {}\n  )\n}) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
